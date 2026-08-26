@@ -44,6 +44,45 @@ npm run dev
 Le site est sur `http://localhost:3000`, l'outil de tri sur
 `http://localhost:3000/outils/tri`.
 
+## Utilisation sur Mac + iPad, sans hébergement
+
+Pas besoin de déployer sur Vercel/Netlify pour utiliser l'outil de tri : il
+peut tourner directement sur un Mac et être utilisé depuis l'iPad, tant que
+les deux appareils sont sur le même réseau Wi-Fi. L'analyse IA a toujours
+besoin d'internet (elle appelle l'API Claude), mais rien n'a besoin d'être
+mis en ligne publiquement.
+
+1. Sur le Mac, une seule fois :
+   ```bash
+   npm install
+   cp .env.example .env.local
+   # puis renseigner ANTHROPIC_API_KEY et ADMIN_PASSWORD dans .env.local
+   npm run build
+   ```
+2. Pour démarrer (à chaque session de travail) :
+   ```bash
+   npm run start:lan
+   ```
+   (`start:lan` sert la version optimisée buildée à l'étape précédente — plus
+   stable pour un usage répété que `dev:lan`, qui recompile à la volée et
+   convient surtout pour tester des modifications de code.)
+3. Trouver l'adresse IP locale du Mac : réglages Wi-Fi → Détails → adresse IP,
+   ou dans le Terminal :
+   ```bash
+   ipconfig getifaddr en0
+   ```
+4. Sur l'iPad, dans Safari (même Wi-Fi) : ouvrir
+   `http://<adresse-ip-du-mac>:3000/outils/tri`, se connecter avec le mot de
+   passe (`ADMIN_PASSWORD`).
+5. Toucher l'icône de partage puis « Sur l'écran d'accueil » : l'outil
+   s'ouvre ensuite en plein écran, avec sa propre icône, comme une vraie
+   appli.
+
+À la première connexion, macOS peut demander d'autoriser les connexions
+entrantes pour Node — accepter. Si l'iPad ne voit pas le Mac, vérifier que le
+réseau Wi-Fi n'isole pas les appareils entre eux (fréquent sur certains
+réseaux d'entreprise ou invités).
+
 ## Déploiement (Vercel ou Netlify)
 
 Le projet est un Next.js standard (App Router) : `app/api/claude` et
