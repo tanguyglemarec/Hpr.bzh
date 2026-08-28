@@ -19,9 +19,10 @@ import { storageSave, storageLoad, storageDelete, storageListKeys } from "@/lib/
 import {
   dayKey, formatDayFR, bestUsageFor, photoEditorialScore,
   normalizePieceKey, photoToStorable, photoFromStorable, describeAnalysisError,
+  buildProjectGroups, pickBeforeAfter,
 } from "@/lib/tri/helpers";
 import { analyzeOnePhoto, generateGroupPostsFor } from "@/lib/tri/api";
-import { Photo, PhotoGroup, GroupPostsState } from "@/lib/tri/types";
+import { Photo, PhotoGroup, ProjectGroup, GroupPostsState } from "@/lib/tri/types";
 import type { UsageId } from "@/lib/tri/types";
 
 // ---------------------------------------------------------------------------
@@ -468,6 +469,91 @@ function GroupCard({ group, isOpen, onToggle, postsState, onGenerate, onCopy, co
 }
 
 // ---------------------------------------------------------------------------
+// Project card (même pièce, plusieurs dates — avant/après)
+// ---------------------------------------------------------------------------
+function ProjectCard({ project, isOpen, onToggle, onOpenPhoto }: {
+  project: ProjectGroup; isOpen: boolean; onToggle: () => void; onOpenPhoto: (photo: Photo) => void;
+}) {
+  const { before, after } = pickBeforeAfter(project.photos);
+  const spansMultipleDays = project.firstDay !== project.lastDay;
+  return (
+    <div className="rounded-md border overflow-hidden" style={{ borderColor: COLORS.line, background: COLORS.panel }}>
+      <button onClick={onToggle} className="w-full flex items-center gap-3 p-3 text-left">
+        <div className="flex -space-x-3 shrink-0">
+          {project.photos.slice(0, 4).map((p) => (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img key={p.id} src={p.dataUrl} alt="" className="w-10 h-10 rounded object-cover border-2" style={{ borderColor: COLORS.panel }} />
+          ))}
+          {project.photos.length > 4 && (
+            <div
+              className="w-10 h-10 rounded flex items-center justify-center text-xs font-semibold border-2"
+              style={{ borderColor: COLORS.panel, background: COLORS.panelRaised, color: COLORS.textMuted }}
+            >
+              +{project.photos.length - 4}
+            </div>
+          )}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="rounded-full shrink-0" style={{ width: 8, height: 8, background: THEMES[project.theme]?.color }} />
+            <span
+              className="font-semibold text-sm truncate"
+              style={{ color: COLORS.textPrimary, fontFamily: FONT_DISPLAY, letterSpacing: "0.03em" }}
+            >
+              PROJET · {project.pieceLabel}
+            </span>
+          </div>
+          <div className="text-xs mt-0.5" style={{ color: COLORS.textMuted, fontFamily: FONT_MONO }}>
+            {spansMultipleDays ? `${formatDayFR(project.firstDay)} → ${formatDayFR(project.lastDay)}` : formatDayFR(project.firstDay)}
+            {" · "}{project.photos.length} photos
+          </div>
+        </div>
+        {isOpen ? <ChevronDown size={16} style={{ color: COLORS.textMuted }} /> : <ChevronRight size={16} style={{ color: COLORS.textMuted }} />}
+      </button>
+
+      {isOpen && (
+        <div className="p-3 pt-0 border-t" style={{ borderColor: COLORS.line }}>
+          {before && after && (
+            <div className="mt-3 flex items-stretch gap-2">
+              <button onClick={() => onOpenPhoto(before)} className="flex-1 min-w-0 text-left">
+                <div className="rounded overflow-hidden aspect-square" style={{ background: "#0d0e10" }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={before.dataUrl} alt="" className="w-full h-full object-cover" />
+                </div>
+                <p className="text-xs mt-1 text-center font-semibold" style={{ color: COLORS.textMuted }}>AVANT</p>
+              </button>
+              <div className="flex items-center shrink-0" style={{ color: COLORS.accent }}>
+                <ArrowRight size={18} />
+              </div>
+              <button onClick={() => onOpenPhoto(after)} className="flex-1 min-w-0 text-left">
+                <div className="rounded overflow-hidden aspect-square" style={{ background: "#0d0e10" }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={after.dataUrl} alt="" className="w-full h-full object-cover" />
+                </div>
+                <p className="text-xs mt-1 text-center font-semibold" style={{ color: COLORS.vert }}>APRÈS</p>
+              </button>
+            </div>
+          )}
+          <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+            {project.photos.map((p) => (
+              <button key={p.id} onClick={() => onOpenPhoto(p)} className="shrink-0 text-left" style={{ width: 64 }}>
+                <div className="rounded overflow-hidden" style={{ width: 64, height: 64, background: "#0d0e10" }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={p.dataUrl} alt="" className="w-full h-full object-cover" />
+                </div>
+                <p className="text-xs mt-1 truncate" style={{ color: COLORS.textMuted, fontFamily: FONT_MONO, fontSize: "9px" }}>
+                  {ETAPES[p.analysis?.lecture.etape || "indetermine"] || "—"}
+                </p>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Detail modal
 // ---------------------------------------------------------------------------
 function PhotoModal({ photo, onClose, onUpdateSite }: {
@@ -680,7 +766,7 @@ export default function PhotoTriApp() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
 
-  const [view, setView] = useState<"galerie" | "dossiers" | "site">("galerie");
+  const [view, setView] = useState<"galerie" | "dossiers" | "projets" | "site">("galerie");
   const [filterVerdict, setFilterVerdict] = useState("tous");
   const [filterTheme, setFilterTheme] = useState("tous");
   const [filterUsage, setFilterUsage] = useState("tous");
@@ -869,6 +955,8 @@ export default function PhotoTriApp() {
       .map((group) => ({ ...group, photos: [...group.photos].sort((a, b) => photoEditorialScore(b) - photoEditorialScore(a)) }))
       .sort((a, b) => (a.day < b.day ? 1 : -1));
   }, [photos]);
+
+  const projects = useMemo<ProjectGroup[]>(() => buildProjectGroups(photos), [photos]);
 
   const handleGeneratePosts = useCallback(async (group: PhotoGroup) => {
     setGroupPosts((prev) => ({ ...prev, [group.key]: { status: "loading", posts: null } }));
@@ -1213,6 +1301,16 @@ export default function PhotoTriApp() {
                   <Layers size={14} /> Séries ({groups.length})
                 </button>
                 <button
+                  onClick={() => setView("projets")}
+                  className="px-3 py-1.5 text-sm font-medium flex items-center gap-1.5"
+                  style={{
+                    background: view === "projets" ? COLORS.panelRaised : "transparent",
+                    color: view === "projets" ? COLORS.textPrimary : COLORS.textMuted,
+                  }}
+                >
+                  <ArrowRight size={14} /> Projets ({projects.length})
+                </button>
+                <button
                   onClick={() => setView("site")}
                   className="px-3 py-1.5 text-sm font-medium flex items-center gap-1.5"
                   style={{
@@ -1344,6 +1442,27 @@ export default function PhotoTriApp() {
                         onGenerate={handleGeneratePosts}
                         onCopy={copyText}
                         copiedKey={copiedKey}
+                      />
+                    ))}
+                  </div>
+                )}
+              </>
+            ) : view === "projets" ? (
+              <>
+                <p className="text-xs mb-3" style={{ color: COLORS.textMuted }}>
+                  Même pièce détectée sur plusieurs photos, toutes dates confondues — pour composer des avant/après.
+                </p>
+                {projects.length === 0 ? (
+                  <EmptyState text="Aucun projet détecté pour l'instant — il faut au moins deux photos de la même pièce, à des dates différentes ou non." />
+                ) : (
+                  <div className="space-y-3">
+                    {projects.map((proj) => (
+                      <ProjectCard
+                        key={proj.key}
+                        project={proj}
+                        isOpen={openGroups.has(`project:${proj.key}`)}
+                        onToggle={() => toggleGroup(`project:${proj.key}`)}
+                        onOpenPhoto={setSelectedPhoto}
                       />
                     ))}
                   </div>

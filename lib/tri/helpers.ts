@@ -1,5 +1,5 @@
 import { USAGES } from "@/lib/tri/constants";
-import { Photo, PhotoAnalysis, StorablePhoto, UsageId } from "@/lib/tri/types";
+import { EtapeId, Photo, PhotoAnalysis, ProjectGroup, StorablePhoto, UsageId } from "@/lib/tri/types";
 
 // dataUrl contient déjà le base64 (data:image/jpeg;base64,XXXX) — pas la peine de
 // dupliquer la donnée en stockage, ça divise quasiment par deux le volume sauvegardé.
@@ -77,4 +77,60 @@ export function normalizePieceKey(piece: string | null | undefined, fallback: st
     .filter((w) => w.length > 2 && !STOPWORDS.has(w))
     .slice(0, 4);
   return words.join("-") || fallback;
+}
+
+const ETAPE_ORDER: Record<EtapeId, number> = {
+  avant: 0, preparation: 1, pendant: 2, apres: 3, atelier: 4, indetermine: 5,
+};
+
+// Regroupe les photos par pièce identique (description normalisée), toutes dates confondues,
+// pour composer des séries avant/après — contrairement aux "séries" du jour (voir PhotoTriApp),
+// un projet peut s'étaler sur plusieurs jours (dépose, traitement, livraison).
+export function buildProjectGroups(photos: Photo[]): ProjectGroup[] {
+  const map = new Map<string, ProjectGroup>();
+  photos
+    .filter((p) => p.status === "done" && p.analysis && p.analysis.piece)
+    .forEach((p) => {
+      const pieceKey = normalizePieceKey(p.analysis!.piece, "");
+      if (!pieceKey) return;
+      const day = dayKey(p.captureDate || p.lastModified);
+      if (!map.has(pieceKey)) {
+        map.set(pieceKey, {
+          key: pieceKey, pieceLabel: p.analysis!.piece as string, theme: p.analysis!.theme,
+          photos: [], firstDay: day, lastDay: day,
+        });
+      }
+      const group = map.get(pieceKey)!;
+      group.photos.push(p);
+      if (day < group.firstDay) group.firstDay = day;
+      if (day > group.lastDay) group.lastDay = day;
+    });
+
+  return Array.from(map.values())
+    .filter((g) => g.photos.length > 1)
+    .map((g) => ({
+      ...g,
+      photos: [...g.photos].sort((a, b) => {
+        const etapeA = ETAPE_ORDER[a.analysis!.lecture.etape] ?? ETAPE_ORDER.indetermine;
+        const etapeB = ETAPE_ORDER[b.analysis!.lecture.etape] ?? ETAPE_ORDER.indetermine;
+        if (etapeA !== etapeB) return etapeA - etapeB;
+        return (a.captureDate || a.lastModified) - (b.captureDate || b.lastModified);
+      }),
+    }))
+    .sort((a, b) => (a.lastDay < b.lastDay ? 1 : -1));
+}
+
+// Choisit la meilleure paire avant/après d'un projet : priorité à l'étape détectée par
+// l'analyse IA, sinon aux extrémités de la chronologie (premier/dernier cliché).
+export function pickBeforeAfter(photos: Photo[]): { before: Photo | null; after: Photo | null } {
+  if (!photos.length) return { before: null, after: null };
+  const before =
+    photos.find((p) => p.analysis?.lecture.etape === "avant") ||
+    photos.find((p) => p.analysis?.recommandation?.role_dans_serie === "avant") ||
+    photos[0];
+  const after =
+    [...photos].reverse().find((p) => p.analysis?.lecture.etape === "apres") ||
+    [...photos].reverse().find((p) => p.analysis?.recommandation?.role_dans_serie === "apres") ||
+    photos[photos.length - 1];
+  return { before, after: after.id === before.id ? null : after };
 }

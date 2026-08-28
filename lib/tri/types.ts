@@ -102,6 +102,17 @@ export interface PhotoGroup {
   photos: Photo[];
 }
 
+// Regroupement d'une même pièce à travers plusieurs dates (contrairement à PhotoGroup,
+// limité à une seule journée) — sert à composer des avant/après.
+export interface ProjectGroup {
+  key: string;
+  pieceLabel: string;
+  theme: ThemeId;
+  photos: Photo[];
+  firstDay: string;
+  lastDay: string;
+}
+
 export interface GroupPost {
   texte: string;
   hashtags: string[];
