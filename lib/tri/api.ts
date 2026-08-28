@@ -8,7 +8,11 @@ type AnthropicContentBlock =
 
 type AnthropicMessage = { role: "user"; content: AnthropicContentBlock[] };
 
-async function callClaudeAPI(messages: AnthropicMessage[], maxTokens = 1000, attempt = 0): Promise<string> {
+async function callClaudeAPI(
+  messages: AnthropicMessage[],
+  maxTokens = 1000,
+  attempt = 0,
+): Promise<{ text: string; truncated: boolean }> {
   const response = await fetch("/api/claude", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -29,12 +33,17 @@ async function callClaudeAPI(messages: AnthropicMessage[], maxTokens = 1000, att
   const data = await response.json();
   const textBlock = (data.content || []).find((b: { type: string }) => b.type === "text");
   if (!textBlock) throw new Error("empty_response");
-  return textBlock.text as string;
+  return { text: textBlock.text as string, truncated: data.stop_reason === "max_tokens" };
 }
 
 const ANALYSIS_PROMPT = `Tu es à la fois directeur artistique, iconographe et responsable éditorial pour HPR, atelier de traitement de surface premium en Bretagne (sablage, microbillage, aérogommage, vaporblasting, thermolaquage, Cerakote, peinture liquide). Clients : aéronautique, horlogerie de luxe, restauration de véhicules de collection, industrie.
 
 Analyse d'abord ce que montre objectivement la photo, puis évalue-la SÉPARÉMENT pour chaque canal. Une photo peut être excellente pour LinkedIn et faible pour Instagram ou pour le site. Ne compense jamais un mauvais cadrage par un sujet intéressant. N'invente ni procédé, ni secteur, ni certification.
+
+Attention à ne jamais confondre thermolaquage et vaporblasting, deux procédés visuellement proches mais opposés dans leur résultat :
+- Thermolaquage = peinture poudre cuite au four → la pièce ressort avec une COULEUR ajoutée (RAL, noir, blanc, teinte vive...), en finition mate, satinée ou brillante selon la poudre. Dès qu'une couleur non métallique recouvre la pièce, c'est du thermolaquage, jamais du vaporblasting — même si le rendu est mat.
+- Vaporblasting = projection humide (eau + abrasif) qui décape et adoucit une surface → la pièce ressort en MÉTAL NU (alu, inox, laiton...), sans aucune couleur ajoutée, avec un aspect satiné/mat uniforme et souvent un léger reflet métallique humide. Si la surface montre encore la couleur naturelle du métal (gris alu, argenté, doré laiton...), c'est du vaporblasting ou un décapage (sablage/microbillage/aérogommage), jamais du thermolaquage.
+En cas de doute persistant sur la surface seule, regarde le contexte (cabine de projection humide et pièce mouillée = vaporblasting ; cabine de peinture, four de cuisson, poudre, pistolet électrostatique = thermolaquage) avant de trancher.
 
 Réponds UNIQUEMENT avec ce JSON, sans texte autour, sans balises markdown :
 {
@@ -85,20 +94,34 @@ Barème des scores d'usage : 9-10 exceptionnel et immédiatement exploitable ; 7
 
 Pour "piece" : décris l'objet physique précis, pas le contexte général. L'objectif est de pouvoir repérer si plusieurs photos montrent la même pièce physique (même chantier) ou des pièces différentes du même type.`;
 
-export async function analyzeOnePhoto(photo: Photo): Promise<PhotoAnalysis> {
-  const text = await callClaudeAPI(
-    [
-      {
-        role: "user",
-        content: [
-          { type: "image", source: { type: "base64", media_type: photo.mediaType, data: photo.base64 } },
-          { type: "text", text: ANALYSIS_PROMPT },
-        ],
-      },
+async function fetchAnalysisJSON(photo: Photo): Promise<Partial<PhotoAnalysis> & Record<string, unknown>> {
+  const message: AnthropicMessage = {
+    role: "user",
+    content: [
+      { type: "image", source: { type: "base64", media_type: photo.mediaType, data: photo.base64 } },
+      { type: "text", text: ANALYSIS_PROMPT },
     ],
-    1800,
-  );
-  const json = extractJSON<Partial<PhotoAnalysis> & Record<string, unknown>>(text);
+  };
+  let maxTokens = 2200;
+  let lastError: unknown = new Error("empty_response");
+  // La réponse (légendes + analyse détaillée) dépasse parfois le budget de tokens et arrive
+  // tronquée, ce qui casse le JSON — indétectable autrement qu'en réessayant avec plus de marge.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const { text, truncated } = await callClaudeAPI([message], maxTokens);
+      if (truncated) throw new Error("truncated_response");
+      return extractJSON<Partial<PhotoAnalysis> & Record<string, unknown>>(text);
+    } catch (err) {
+      lastError = err;
+      maxTokens = 3600;
+      if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+    }
+  }
+  throw lastError;
+}
+
+export async function analyzeOnePhoto(photo: Photo): Promise<PhotoAnalysis> {
+  const json = await fetchAnalysisJSON(photo);
   const scores = (json.scores as Record<string, number>) || {};
   const vals = Object.values(scores).filter((v) => typeof v === "number");
   const score_global = vals.length ? Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10 : 0;
@@ -175,6 +198,6 @@ export async function generateGroupPostsFor(group: PhotoGroup): Promise<Record<s
     { type: "text", text: groupPromptText(formatDayFR(group.day), group.photos.length, platformsSet, snippets) },
   ];
 
-  const text = await callClaudeAPI([{ role: "user", content }], 1000);
+  const { text } = await callClaudeAPI([{ role: "user", content }], 1000);
   return extractJSON<Record<string, GroupPost>>(text);
 }
