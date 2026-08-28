@@ -31,6 +31,20 @@ export function extractJSON<T = unknown>(text: string): T {
   return JSON.parse(cleaned.slice(start, end + 1)) as T;
 }
 
+const ANALYSIS_ERROR_LABELS: Record<string, string> = {
+  api_401: "Clé API Anthropic invalide.",
+  api_413: "Photo trop lourde pour l'API.",
+  api_429: "Limite de débit API atteinte, réessaie plus tard.",
+  empty_response: "Réponse vide du modèle.",
+  json_not_found: "Réponse du modèle illisible (pas de JSON).",
+  truncated_response: "Réponse du modèle tronquée.",
+};
+
+export function describeAnalysisError(err: unknown): string {
+  const code = err instanceof Error ? err.message : String(err);
+  return ANALYSIS_ERROR_LABELS[code] || (code.startsWith("api_") ? `Erreur API (${code.slice(4)})` : "Analyse échouée");
+}
+
 export function clampScore(value: unknown): number {
   const n = Number(value);
   return Number.isFinite(n) ? Math.max(0, Math.min(10, Math.round(n * 10) / 10)) : 0;

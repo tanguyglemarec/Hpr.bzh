@@ -18,7 +18,7 @@ import { resizeImageFile, extractExifDate } from "@/lib/tri/exif";
 import { storageSave, storageLoad, storageDelete, storageListKeys } from "@/lib/tri/storage";
 import {
   dayKey, formatDayFR, bestUsageFor, photoEditorialScore,
-  normalizePieceKey, photoToStorable, photoFromStorable,
+  normalizePieceKey, photoToStorable, photoFromStorable, describeAnalysisError,
 } from "@/lib/tri/helpers";
 import { analyzeOnePhoto, generateGroupPostsFor } from "@/lib/tri/api";
 import { Photo, PhotoGroup, GroupPostsState } from "@/lib/tri/types";
@@ -201,9 +201,9 @@ function PhotoCard({ photo, onOpen, onRetry }: { photo: Photo; onOpen: (p: Photo
           </div>
         )}
         {photo.status === "error" && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5" style={{ background: "#00000090" }}>
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5" style={{ background: "#00000090" }} title={photo.error || undefined}>
             <AlertTriangle size={18} style={{ color: COLORS.rouge }} />
-            <span className="text-xs" style={{ color: COLORS.rouge }}>Échec</span>
+            <span className="text-xs" style={{ color: COLORS.rouge }}>{photo.error || "Échec"}</span>
             <button
               onClick={(e) => { e.stopPropagation(); onRetry(photo); }}
               className="flex items-center gap-1 text-xs px-2 py-0.5 rounded"
@@ -498,7 +498,7 @@ function PhotoModal({ photo, onClose, onUpdateSite }: {
           </button>
           {photo.status !== "done" || !a ? (
             <p style={{ color: COLORS.textMuted }} className="pr-8">
-              {photo.status === "analyzing" ? "Analyse en cours…" : photo.status === "error" ? "Analyse échouée." : "Pas encore analysée."}
+              {photo.status === "analyzing" ? "Analyse en cours…" : photo.status === "error" ? (photo.error || "Analyse échouée.") : "Pas encore analysée."}
             </p>
           ) : (
             <>
@@ -826,8 +826,9 @@ export default function PhotoTriApp() {
           const updated: Photo = { ...current, status: "done", analysis, error: null };
           setPhotos((prev) => prev.map((p) => (p.id === current.id ? updated : p)));
           storageSave(`photo:${current.id}`, photoToStorable(updated));
-        } catch {
-          setPhotos((prev) => prev.map((p) => (p.id === current.id ? { ...p, status: "error", error: "Analyse échouée" } : p)));
+        } catch (err) {
+          const error = describeAnalysisError(err);
+          setPhotos((prev) => prev.map((p) => (p.id === current.id ? { ...p, status: "error", error } : p)));
         } finally {
           doneCount += 1;
           setProgress({ done: doneCount, total: toAnalyze.length });
@@ -845,8 +846,9 @@ export default function PhotoTriApp() {
       const updated: Photo = { ...photo, status: "done", analysis, error: null };
       setPhotos((prev) => prev.map((p) => (p.id === photo.id ? updated : p)));
       storageSave(`photo:${photo.id}`, photoToStorable(updated));
-    } catch {
-      setPhotos((prev) => prev.map((p) => (p.id === photo.id ? { ...p, status: "error", error: "Analyse échouée" } : p)));
+    } catch (err) {
+      const error = describeAnalysisError(err);
+      setPhotos((prev) => prev.map((p) => (p.id === photo.id ? { ...p, status: "error", error } : p)));
     }
   }, []);
 
